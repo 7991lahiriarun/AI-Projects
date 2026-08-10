@@ -1,0 +1,142 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Multi Timezone Digital Clock — Enhanced</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{--bg:#0b1020;--card:#0f1720;--muted:#9aa;--accent:#0a84ff;}
+    body { font-family: system-ui, Arial; background:var(--bg); color:#eee; margin:0; padding:18px; }
+    .top { display:flex; gap:12px; align-items:center; margin-bottom:12px; }
+    input, select { padding:8px 10px; border-radius:8px; border:1px solid #222; background:#071022; color:#eee }
+    button { padding:8px 10px; border-radius:8px; background:var(--accent); color:#fff; border:none; cursor:pointer }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; }
+    .card { background:var(--card); border-radius:10px; padding:12px; box-shadow:0 6px 18px rgba(0,0,0,0.6) }
+    .hdr { display:flex; justify-content:space-between; align-items:center }
+    .tz { font-weight:700 }
+    .time { font-size:18px; margin-top:6px }
+    .sub { color:var(--muted); font-size:13px; margin-top:6px }
+    .small { font-size:12px }
+    .controls { display:flex; gap:6px; margin-left:auto }
+    .alarm-list { margin-top:8px; font-size:13px }
+    @media (max-width:600px){ body{padding:10px} }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <input id="tzInput" placeholder="Add timezone (e.g. Europe/London)" list="tzlist" />
+    <datalist id="tzlist"></datalist>
+    <button id="addBtn">Add</button>
+    <button id="saveBtn">Save</button>
+    <button id="loadBtn">Load</button>
+    <button id="alarmsBtn">Alarms</button>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <audio id="beep" src="data:audio/wav;base64,UklGRogAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQgAAAAA"></audio>
+
+<script>
+const commonZones = [
+  "UTC","Europe/London","Europe/Berlin","Europe/Paris","America/New_York","America/Chicago","America/Los_Angeles",
+  "Asia/Kolkata","Asia/Tokyo","Asia/Shanghai","Asia/Singapore","Australia/Sydney","Pacific/Auckland"
+];
+const tzList = document.getElementById('tzlist');
+commonZones.forEach(z=>{
+  const opt = document.createElement('option'); opt.value = z; tzList.appendChild(opt);
+});
+
+const grid = document.getElementById('grid');
+const beep = document.getElementById('beep');
+let alarms = JSON.parse(localStorage.getItem('clocks:alarms') || '[]');
+let zones = JSON.parse(localStorage.getItem('clocks:zones') || '[]');
+
+function createCard(tz){
+  const card = document.createElement('div'); card.className='card'; card.dataset.tz=tz;
+  card.innerHTML = `<div class='hdr'><div><div class='tz'>${tz}</div><div class='sub' id='sub-${tz}'>--</div></div><div class='controls'><button class='addAlarm'>Alarm</button><button class='remove'>Remove</button></div></div><div class='time' id='time-${tz}'>--:--:--</div><div class='sub small' id='offset-${tz}'></div><div class='alarm-list' id='alarms-${tz}'></div>`;
+  card.querySelector('.remove').addEventListener('click', ()=>{ card.remove(); zones = zones.filter(z=>z!==tz); saveZones(); renderAlarms(); });
+  card.querySelector('.addAlarm').addEventListener('click', ()=>{ addAlarmUI(tz); });
+  return card;
+}
+
+function addZone(tz){
+  if(!tz) return; if(Array.from(document.querySelectorAll('.card')).some(c=>c.dataset.tz===tz)) return;
+  const c = createCard(tz); grid.appendChild(c); zones.push(tz); saveZones(); renderAlarms(); updateClocks();
+}
+
+function saveZones(){ localStorage.setItem('clocks:zones', JSON.stringify(zones)); }
+function saveAlarms(){ localStorage.setItem('clocks:alarms', JSON.stringify(alarms)); }
+
+function loadState(){ zones = JSON.parse(localStorage.getItem('clocks:zones') || '[]'); alarms = JSON.parse(localStorage.getItem('clocks:alarms') || '[]'); grid.innerHTML=''; zones.forEach(z=> grid.appendChild(createCard(z))); renderAlarms(); }
+
+function renderAlarms(){ // show alarms per card
+  document.querySelectorAll('.alarm-list').forEach(el=>el.innerHTML='');
+  alarms.forEach((a, idx)=>{
+    const el = document.getElementById('alarms-'+a.tz);
+    if(el){ const row = document.createElement('div'); row.textContent = `${a.time} ${a.recurring? '(daily)':''} ${a.label? '- '+a.label:''}`;
+      const del = document.createElement('button'); del.textContent='✖'; del.style.marginLeft='8px'; del.addEventListener('click', ()=>{ alarms.splice(idx,1); saveAlarms(); renderAlarms(); });
+      row.appendChild(del); el.appendChild(row);
+    }
+  });
+}
+
+function addAlarmUI(tz){ const time = prompt('Alarm time in 24h HH:MM for '+tz); if(!time) return; const rec = confirm('Recurring daily?'); const label = prompt('Label (optional)')||''; alarms.push({tz:tz, time:time, recurring:rec, label:label}); saveAlarms(); renderAlarms(); }
+
+function updateClocks(){ document.querySelectorAll('.card').forEach(card=>{
+  const tz = card.dataset.tz; try{
+    const now = new Date();
+    const opts = { timeZone: tz, hour12:false, year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', weekday:'short' };
+    const f = new Intl.DateTimeFormat([], opts); const parts = f.formatToParts(now);
+    const date = parts.filter(p=>['year','month','day'].includes(p.type)).map(p=>p.value).join('-');
+    const time = parts.filter(p=>['hour','minute','second'].includes(p.type)).map(p=>p.value).join(':');
+    const weekday = parts.find(p=>p.type==='weekday')?.value||'';
+    document.getElementById('time-'+tz).textContent = `${date} ${time} (${weekday})`;
+    // offset
+    const dt = new Date().toLocaleString('en-US', {timeZone: tz});
+    // compute offset via differences
+    const local = new Date(); const tzDate = new Date(dt);
+    const offsetMin = (tzDate.getTime() - local.getTime())/60000; // approx might vary
+    const offHours = Math.round(offsetMin/60*100)/100;
+    document.getElementById('offset-'+tz).textContent = `Offset ≈ ${offHours>=0?'+':''}${offHours}h`;
+  }catch(e){ document.getElementById('time-'+tz).textContent='Invalid timezone'; }
+ }); checkAlarms(); }
+
+function checkAlarms(){ const now = new Date(); const hhmm = now.toLocaleTimeString('en-GB',{hour12:false,hour:'2-digit',minute:'2-digit'});
+  alarms.forEach((a,idx)=>{
+    // convert now to tz local hour:minute
+    try{
+      const opts = {timeZone: a.tz, hour12:false, hour:'2-digit', minute:'2-digit'};
+      const t = new Intl.DateTimeFormat([], opts).format(new Date());
+      if(t === a.time){ // trigger
+        triggerAlarm(a);
+        if(!a.recurring){ alarms.splice(idx,1); saveAlarms(); renderAlarms(); }
+      }
+    }catch(e){/*ignore*/}
+  });
+}
+
+let lastTriggers = {};
+function triggerAlarm(a){ const key = a.tz+'|'+a.time; if(lastTriggers[key]) return; lastTriggers[key]=true; setTimeout(()=>{ delete lastTriggers[key]; }, 61000);
+  // visual
+  const card = document.querySelector(`.card[data-tz='${a.tz}']`);
+  if(card){ card.style.background = '#ffefef'; setTimeout(()=>{ card.style.background=''; }, 2000); }
+  // sound
+  beep.play().catch(()=>{});
+  // notification
+  if(window.Notification && Notification.permission==='granted'){ new Notification('Alarm', { body: `${a.label||a.time} (${a.tz})` }); }
+  else if(window.Notification && Notification.permission!=='denied'){ Notification.requestPermission().then(p=>{ if(p==='granted') new Notification('Alarm', { body: `${a.label||a.time} (${a.tz})` }); }); }
+}
+
+// wire controls
+document.getElementById('addBtn').addEventListener('click', ()=>{ const v=document.getElementById('tzInput').value.trim(); if(v) addZone(v); document.getElementById('tzInput').value=''; });
+document.getElementById('saveBtn').addEventListener('click', ()=>{ saveZones(); saveAlarms(); alert('Saved to localStorage'); });
+document.getElementById('loadBtn').addEventListener('click', ()=>{ loadState(); });
+document.getElementById('alarmsBtn').addEventListener('click', ()=>{ const s = JSON.stringify(alarms, null, 2); prompt('Current alarms (edit manually to modify):', s); });
+
+// init
+loadState(); if(zones.length===0){ ['UTC','America/New_York','Asia/Kolkata'].forEach(z=> addZone(z)); }
+setInterval(updateClocks, 1000);
+updateClocks(); renderAlarms();
+</script>
+</body>
+</html>
