@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+requests
+gradio
+sentence-transformers
+chromadb
+transformers>=4.30.0
+torch
+typing-extensions
+pydantic
+anthropic
