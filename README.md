@@ -30,12 +30,5 @@ Quickstart (local)
 5. In another shell, run the Gradio UI
    python web/gradio_app.py
 
-Notes
-- The project is scaffolded for local / experimental use. For production, secure the vector DB, add authentication, and sandbox any tool execution.
-- Respect terms of use when using Anthropic or other provider APIs.
 
-Next steps I can do for you
-- Add Dockerfile + docker-compose to run the stack in containers
-- Add Anthropic client integration examples and test keys management
-- Add sample documents and automated ingestion scripts
 
